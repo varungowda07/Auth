@@ -1,7 +1,7 @@
 const User = require('../models/userModel');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const transport = require("../middleware/sendMail");
+const sendMail = require("../middleware/sendMail");
 
 // Helper function for sending standardized responses
 const sendResponse = (res, status, success, message, data = null) => {
@@ -89,13 +89,18 @@ exports.sendVerificationCode = async (req, res) => {
         if (user.verified) return sendResponse(res, 200, false, "User already verified");
 
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-        await transport.sendMail({
-            from: process.env.EMAIL_ADDRESS,
+        await sendMail({
             to: user.email,
             subject: "Verification Code",
             html: `<h3>Your verification code is:</h3><h1>${code}</h1>`
         });
+
+        // await transport.sendMail({
+        //     from: process.env.EMAIL_ADDRESS,
+        //     to: user.email,
+        //     subject: "Verification Code",
+        //     html: `<h3>Your verification code is:</h3><h1>${code}</h1>`
+        // });
 
         user.verificationCode = code;
         user.verificationCodeValidation = Date.now() + 10 * 60 * 1000; // 10 min expiry
@@ -167,13 +172,18 @@ exports.forgotPasswordCode = async (req, res) => {
         if (!user) return sendResponse(res, 404, false, "User not found");
 
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-        await transport.sendMail({
-            from: process.env.EMAIL_ADDRESS,
+        await sendMail({
             to: user.email,
-            subject: "Password Reset Code",
-            html: `<h3>Use this code to reset your password:</h3><h1>${code}</h1>`
+            subject: "Verification Code",
+            html: `<h3>Your verification code is:</h3><h1>${code}</h1>`
         });
+
+        // await transport.sendMail({
+        //     from: process.env.EMAIL_ADDRESS,
+        //     to: user.email,
+        //     subject: "Password Reset Code",
+        //     html: `<h3>Use this code to reset your password:</h3><h1>${code}</h1>`
+        // });
 
         user.forgetPasswordCode = code;
         user.forgetPasswordCodeValidation = Date.now() + 10 * 60 * 1000; // 10 min expiry
