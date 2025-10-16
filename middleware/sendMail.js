@@ -1,12 +1,10 @@
 const nodeMailer = require('nodemailer');
 
 const transport = nodeMailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,      // SSL port
-    secure: true,   // true for 465, false for 587
+    service: 'SendGrid',
     auth: {
-        user: process.env.EMAIL_ADDRESS,
-        pass: process.env.PASSWORD, // App password
+        user: process.env.SENDGRID_USERNAME,
+        pass: process.env.SENDGRID_PASSWORD,
     },
 });
 
