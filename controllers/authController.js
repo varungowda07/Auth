@@ -3,288 +3,212 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const transport = require("../middleware/sendMail");
 
+// Helper function for sending standardized responses
+const sendResponse = (res, status, success, message, data = null) => {
+    return res.status(status).json({ success, message, result: data });
+};
+
 exports.signUp = async (req, res) => {
-    const { email, password } = req.body
-    if (!email || !password) {
-        return res.status(400).json({ success: false, message: "Email or password cannot be empty" });
-    }
-    const exisitingUser = await User.findOne({ email: email });
-    if (exisitingUser) {
-        return res.status(409).json({ success: false, message: "User already Exisit" });
-    }
-    const hash = await bcrypt.hash(password, 10);
-    const newUser = new User({
-        email,
-        password: hash
-    });
-    const result = await newUser.save();
-    result.password = null;
-    res.status(201).json({ success: true, message: "User created", result });
-}
-exports.signIn = async (req, res) => {
     try {
         const { email, password } = req.body;
 
         if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: "Email or Password can't be empty"
-            });
+            return sendResponse(res, 400, false, "Email or password cannot be empty");
         }
 
-        const existingUser = await User.findOne({ email }).select('+password');
-
-        if (!existingUser) {
-            return res.status(401).json({
-                success: false,
-                message: "User not found"
-            });
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return sendResponse(res, 409, false, "User already exists");
         }
 
-        const match = await bcrypt.compare(password, existingUser.password);
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = await User.create({ email, password: hashedPassword });
+        newUser.password = undefined; // Hide password in response
 
-        if (!match) {
-            return res.status(401).json({
-                success: false,
-                message: "Password doesn't match"
-            });
+        return sendResponse(res, 201, true, "User created successfully", newUser);
+    } catch (error) {
+        console.error(error);
+        return sendResponse(res, 500, false, "Internal Server Error");
+    }
+};
+
+exports.signIn = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return sendResponse(res, 400, false, "Email or password cannot be empty");
         }
+
+        const user = await User.findOne({ email }).select('+password');
+        if (!user) return sendResponse(res, 401, false, "User not found");
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return sendResponse(res, 401, false, "Incorrect password");
 
         const token = jwt.sign(
-            {
-                userId: existingUser._id,
-                email: existingUser.email,
-                verified: existingUser.verified
-            },
+            { userId: user._id, email: user.email, verified: user.verified },
             process.env.TOKEN_SECRET,
             { expiresIn: '8h' }
         );
 
         res.cookie('jwt', 'Bearer ' + token, {
-            maxAge: 8 * 60 * 60 * 1000, // 8 hours
-            httpOnly: process.env.NODE_ENV === 'production',
+            maxAge: 8 * 60 * 60 * 1000,
+            httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict'
         });
 
-        res.status(200).json({
-            success: true,
-            message: "User logged in successfully",
-            token
-        });
-
+        return sendResponse(res, 200, true, "User logged in successfully", { token });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: "Internal Server Error"
-        });
+        return sendResponse(res, 500, false, "Internal Server Error");
     }
 };
-exports.logout = (req, res) => {
-    res.clearCookie('jwt', {
-        httpOnly: process.env.NODE_ENV === 'production',
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict'
-    });
-    return res.status(200).json({
-        success: true,
-        message: "Logged out"
-    });
-}
-exports.sendVerificationCode = async (req, res) => {
-    const { email } = req.body;
+
+exports.logout = async (req, res) => {
     try {
-        const exisitingUser = await User.findOne({ email: email }).select('+verificationCode +verificationCodeValidation');
-        if (!exisitingUser) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found"
-            });
-        }
-        if (exisitingUser.verified == true) {
-            return res.status(200).json({
-                success: false,
-                message: "User already verified"
-            })
-        }
-        const sendCode = Math.floor(Math.random() * 100000).toString().padStart(5, "0");
-
-        const info = await transport.sendMail({
-            from: process.env.EMAIL_ADDRESS,
-            to: exisitingUser.email,
-            subject: "Verfication code",
-            html: '<h1>' + sendCode + '</h1>'
+        res.clearCookie('jwt', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict'
         });
-        if (info.accepted[0] === exisitingUser.email) {
-            exisitingUser.verificationCode = sendCode;
-            console.log(exisitingUser.verificationCode);
-            exisitingUser.verificationCodeValidation = Date.now();
-            await exisitingUser.save();
-            return res.status(200).json({
-                success: true,
-                message: "Verification code send successfull"
-            });
-        }
-        else {
-            res.status(400).json({
-                success: false,
-                message: "Verfication Code not sent"
-            });
-        }
-
+        return sendResponse(res, 200, true, "Logged out successfully");
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Something went wrong"
-        })
-
+        console.error(error);
+        return sendResponse(res, 500, false, "Internal Server Error");
     }
-}
+};
+
+exports.sendVerificationCode = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return sendResponse(res, 400, false, "Email is required");
+
+        const user = await User.findOne({ email }).select('+verificationCode +verificationCodeValidation');
+        if (!user) return sendResponse(res, 404, false, "User not found");
+        if (user.verified) return sendResponse(res, 200, false, "User already verified");
+
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+        await transport.sendMail({
+            from: process.env.EMAIL_ADDRESS,
+            to: user.email,
+            subject: "Verification Code",
+            html: `<h3>Your verification code is:</h3><h1>${code}</h1>`
+        });
+
+        user.verificationCode = code;
+        user.verificationCodeValidation = Date.now() + 10 * 60 * 1000; // 10 min expiry
+        await user.save();
+
+        return sendResponse(res, 200, true, "Verification code sent successfully");
+    } catch (error) {
+        console.error(error);
+        return sendResponse(res, 500, false, "Failed to send verification code");
+    }
+};
+
 exports.verifyVerificationCode = async (req, res) => {
-    const { email, responseCode } = req.body;
-    const exisitingUser = await User.findOne({ email }).select('+verificationCode');
-    if (exisitingUser.verified === true) {
-        return res.status(200).json({
-            success: false,
-            message: "User already verified"
-        })
-    }
-    if (!exisitingUser) {
-        return res.status(404).json({
-            success: false,
-            message: "User not found"
-        })
-    }
-    if (exisitingUser.verificationCode != responseCode) {
-        return res.status(404).json({
-            success: false,
-            message: "Responsecode doesn't match"
-        })
-    }
-    exisitingUser.verified = true;
-    const result = await exisitingUser.save()
-    return res.status(200).json({
-        success: true,
-        message: "User verified",
-        result
-    })
+    try {
+        const { email, code } = req.body;
+        if (!email || !code) return sendResponse(res, 400, false, "Email and code are required");
 
-}
+        const user = await User.findOne({ email }).select('+verificationCode +verificationCodeValidation');
+        if (!user) return sendResponse(res, 404, false, "User not found");
+        if (user.verified) return sendResponse(res, 200, false, "User already verified");
+
+        if (user.verificationCode !== code) return sendResponse(res, 400, false, "Invalid verification code");
+
+        if (Date.now() > user.verificationCodeValidation) return sendResponse(res, 400, false, "Verification code expired");
+
+        user.verified = true;
+        user.verificationCode = null;
+        user.verificationCodeValidation = null;
+        await user.save();
+
+        return sendResponse(res, 200, true, "User verified successfully");
+    } catch (error) {
+        console.error(error);
+        return sendResponse(res, 500, false, "Verification failed");
+    }
+};
+
 exports.changePassword = async (req, res) => {
-    const { userId, verified } = req.user;
-    const { oldPassword, newPassword } = req.body;
-    const exisitingUser = await User.findOne({ _id: userId }).select('+password');
-    if (!exisitingUser) {
-        return res.status(401).json({
-            success: false,
-            message: "Your not authorized"
-        })
-    }
+    try {
+        const { userId } = req.user;
+        const { oldPassword, newPassword } = req.body;
+        if (!oldPassword || !newPassword) return sendResponse(res, 400, false, "Old and new passwords are required");
 
-    const hash = await bcrypt.compare(exisitingUser.password, oldPassword)
-    if (hash) {
-        return res.status(400).json({
-            success: false,
-            message: "The password you entered is incorrect!"
-        })
-    }
-    if (exisitingUser.password === newPassword) {
-        return res.status(409).json({
-            success: false,
-            message: "New password cannot be same as old password"
-        })
-    }
-    const hashPassword = await bcrypt.hash(newPassword, 10);
-    exisitingUser.password = hashPassword;
-    await exisitingUser.save();
-    res.status(200).json({
-        success: true,
-        message: "Password updated"
-    });
+        const user = await User.findById(userId).select('+password');
+        if (!user) return sendResponse(res, 401, false, "User not authorized");
 
-}
+        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        if (!isMatch) return sendResponse(res, 400, false, "Incorrect old password");
+
+        const isSame = await bcrypt.compare(newPassword, user.password);
+        if (isSame) return sendResponse(res, 409, false, "New password cannot be same as old password");
+
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+
+        return sendResponse(res, 200, true, "Password updated successfully");
+    } catch (error) {
+        console.error(error);
+        return sendResponse(res, 500, false, "Failed to update password");
+    }
+};
+
 exports.forgotPasswordCode = async (req, res) => {
     try {
         const { email } = req.body;
-        const existingUser = await User.findOne({ email: email }).select('+forgetPasswordCode +forgetPasswordCodeValidation');
+        if (!email) return sendResponse(res, 400, false, "Email is required");
 
-        if (!existingUser) {
-            return res.status(404).json({
-                success: false,
-                message: "Enter a valid email."
-            });
-        }
+        const user = await User.findOne({ email }).select('+forgetPasswordCode +forgetPasswordCodeValidation');
+        if (!user) return sendResponse(res, 404, false, "User not found");
 
-        // Generate 6-digit code
         const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Send email
-        console.log("Sending code to:", email);
         await transport.sendMail({
             from: process.env.EMAIL_ADDRESS,
-            to: existingUser.email,
-            subject: "Verification code",
-            html: `<h4>Enter this code to reset your password</h4><br><h1>${code}</h1>`
+            to: user.email,
+            subject: "Password Reset Code",
+            html: `<h3>Use this code to reset your password:</h3><h1>${code}</h1>`
         });
 
-        // Save code & expiry
-        existingUser.forgetPasswordCode = code;
-        existingUser.forgetPasswordCodeValidation = Date.now() + 2 * 60 * 1000; // 10 minutes
-        await existingUser.save();
+        user.forgetPasswordCode = code;
+        user.forgetPasswordCodeValidation = Date.now() + 10 * 60 * 1000; // 10 min expiry
+        await user.save();
 
-        res.status(200).json({
-            success: true,
-            message: "Code sent successfully"
-        });
-
+        return sendResponse(res, 200, true, "Password reset code sent successfully");
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: "Something went wrong"
-        });
+        return sendResponse(res, 500, false, "Failed to send password reset code");
     }
 };
+
 exports.resetPassword = async (req, res) => {
     try {
-        const { code, newPassword } = req.body || {};
+        const { code, newPassword } = req.body;
         const { email } = req.user;
+        if (!code || !newPassword) return sendResponse(res, 400, false, "Code and new password required");
 
-        if (!code || !newPassword) {
-            return res.status(400).json({ success: false, message: "Code and new password are required" });
-        }
+        const user = await User.findOne({ email }).select('+password +forgetPasswordCode +forgetPasswordCodeValidation');
+        if (!user) return sendResponse(res, 404, false, "User not found");
 
-        const existingUser = await User.findOne({ email }).select('+password +forgetPasswordCode +forgetPasswordCodeValidation');
+        if (user.forgetPasswordCode !== code) return sendResponse(res, 400, false, "Invalid code");
+        if (Date.now() > user.forgetPasswordCodeValidation) return sendResponse(res, 400, false, "Code expired");
 
-        if (!existingUser) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
+        const isSame = await bcrypt.compare(newPassword, user.password);
+        if (isSame) return sendResponse(res, 409, false, "New password cannot be same as old password");
 
-        if (existingUser.forgetPasswordCode !== code) {
-            return res.status(400).json({ success: false, message: "The code is invalid" });
-        }
+        user.password = await bcrypt.hash(newPassword, 10);
+        user.forgetPasswordCode = null;
+        user.forgetPasswordCodeValidation = null;
+        await user.save();
 
-        if (Date.now() > existingUser.forgetPasswordCodeValidation) {
-            return res.status(400).json({ success: false, message: "The code you entered has expired" });
-        }
-
-        const match = await bcrypt.compare(newPassword, existingUser.password);
-        if (match) {
-            return res.status(409).json({ success: false, message: "The new password cannot be the same as the old password" });
-        }
-
-        existingUser.password = await bcrypt.hash(newPassword, 10);
-        existingUser.forgetPasswordCode = null;
-        existingUser.forgetPasswordCodeValidation = null;
-
-        await existingUser.save();
-
-        res.status(200).json({ success: true, message: "Password reset successfully" });
-
+        return sendResponse(res, 200, true, "Password reset successfully");
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: "Internal Server Error" });
+        return sendResponse(res, 500, false, "Failed to reset password");
     }
 };
-
