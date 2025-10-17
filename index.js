@@ -7,16 +7,19 @@ const helmet= require('helmet');
 const auth = require('./routers/authRouter')
 const post = require('./routers/postRouters');
 
+
 const app = express();
 connectDB();
 
 
 //middleware
+app.use('/upload', express.static('upload'));
 app.use(cookieParser());
 app.use(express.json());
 app.use(cors());
 app.use(express.urlencoded({extended:true}));
 app.use(helmet());
+
 
 app.use('/auth/api',auth);
 app.use('/api',post)

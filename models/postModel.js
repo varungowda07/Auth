@@ -10,6 +10,10 @@ const postSchema = mongoose.Schema({
         type:String,
         required:[true,"Description cannot be empty"]
     },
+    image:{
+        type:String,
+        required:[true,"Image cannot be empty"]
+    },
     userId:{
         type:mongoose.Schema.Types.ObjectId,
         ref:'User',

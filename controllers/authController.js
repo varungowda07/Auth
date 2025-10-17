@@ -103,6 +103,7 @@ exports.sendVerificationCode = async (req, res) => {
         // });
 
         user.verificationCode = code;
+        console.log(user.verificationCode);
         user.verificationCodeValidation = Date.now() + 10 * 60 * 1000; // 10 min expiry
         await user.save();
 
