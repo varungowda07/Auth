@@ -3,14 +3,30 @@ const Post = require('../models/postModel')
 exports.createPost = async (req, res) => {
 
     try {
-        const { title, description } = req.body;
+        let { title, description } = req.body;
         const { userId } = req.user;
-        if (!req.file) return res.status(400).json({ success: false, message: "Image required" });
-        const imageUrl = `/upload/${req.file.filename}`;
-        if (!title || !description) {
+        if (!req.file) return res.status(400).json({ success: false, message: "Image required/Image should be jpg/png" });
+        const allowedTypes = ['image/jpg', 'image/png', 'image/jpeg'];
+        if (!allowedTypes.includes(req.file.mimetype)) {
             return res.status(400).json({
                 success: false,
-                message: "Title or Description cannot be empty"
+                message: "The image should be jpg/jpeg/png"
+            })
+        }
+        const maxSize = 2 * 1024 * 1024; // 2 MB
+        if (req.file.size > maxSize) {
+            return res.status(400).json({
+                success: false,
+                message: "Image size should not exceed 2 MB"
+            });
+        }
+        const imageUrl = `/upload/${req.file.filename}`;
+        title = title.trim();
+        description = description.trim();
+        if (!title || !description || title.length <=3 || description.length <= 3) {
+            return res.status(400).json({
+                success: false,
+                message: "Title or Description cannot be empty / Title or Description should be atleast 3 characters"
             });
         }
         const post = await Post.create({
@@ -36,7 +52,6 @@ exports.createPost = async (req, res) => {
 
 }
 exports.getAllPost = async (req, res) => {
-    const { userId, email } = req.user;
     const posts = await Post.find().populate('userId', 'email');
     try {
         return res.status(200).json({
@@ -87,7 +102,7 @@ exports.updatePostById = async (req, res) => {
         const { title, description } = req.body;
         const { userId } = req.user;
         let imageUrl = '';
-        if(req.file) {
+        if (req.file) {
             imageUrl = `/upload/${req.file.filename}`
         }
         // Find the post by id
@@ -111,7 +126,7 @@ exports.updatePostById = async (req, res) => {
         // Update the fields
         if (title) post.title = title;
         if (description) post.description = description;
-        if(imageUrl != '' && imageUrl) post.image = imageUrl
+        if (imageUrl != '' && imageUrl) post.image = imageUrl
 
         const updatedPost = await post.save();
 

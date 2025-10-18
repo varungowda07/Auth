@@ -20,7 +20,7 @@ exports.fileFilter = (req, file, cb) => {
   if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
     cb(null, true);
   } else {
-    cb(new Error('Only .jpg and .png files are allowed!'), false);
+    cb(null, false);
   }
 };
 // ✅ Create upload instance

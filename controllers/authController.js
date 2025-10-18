@@ -10,7 +10,11 @@ const sendResponse = (res, status, success, message, data = null) => {
 
 exports.signUp = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        let { email, password } = req.body;
+        password = password.trim();
+        if(password.length <3) {
+            return sendResponse(res,400,false,"Password must atleast three characters");
+        }
 
         if (!email || !password) {
             return sendResponse(res, 400, false, "Email or password cannot be empty");
